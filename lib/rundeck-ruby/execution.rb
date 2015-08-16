@@ -51,6 +51,17 @@ module Rundeck
       ret
     end
 
+    def wait_for_complete(poll_interval, timeout)
+      Timeout.timeout(timeout) do
+        while (cur = self.class.find(session, id)).status != :succeeded
+          raise "Execution #{url} failed" if cur.status == :failed
+          sleep(poll_interval)
+        end
+      end
+    rescue Timeout::Error
+      raise "Timed out while waiting for execution #{url} on #{job} to complete"
+    end
+
     class QueryBuilder
       attr_accessor :status, :max, :offset
 
