@@ -46,10 +46,18 @@ module Rundeck
         Execution::QueryBuilder.valid_statuses
       end
 
+      class ValidationError < StandardError
+        def initialize(field, value, message=nil)
+          msg = "Invalid #{field}: #{value}"
+          msg += message unless message==nil
+          super(msg)
+        end
+      end
+
       def validate
-        raise "Invalid requested status: #{status}" unless status.nil? || self.class.valid_statuses.include?(status.to_s)
-        raise "Invalid offset" unless offset.nil? || offset.to_i >= 0
-        raise "Invalid max" unless max.nil? || max.to_i >= 0
+        raise ValidationError.new("status", status) unless status.nil? || self.class.valid_statuses.include?(status.to_s)
+        raise ValidationError.new("offset", offset) unless offset.nil? || offset.to_i >= 0
+        raise ValidationError.new("max", max) unless max.nil? || max.to_i >= 0
       end
 
       def query
