@@ -1,4 +1,22 @@
 module Rundeck
+  class ExecutionTimeout < StandardError
+    def initialize(execution)
+      super("Timed out while waiting for execution #{execution.url} to complete")
+    end
+  end
+
+  class ExecutionFailure < StandardError
+    def initialize(execution)
+      super("Execution #{execution.url} failed")
+    end
+  end
+
+  class APIFailure < StandardError
+    def initialize(call, status)
+      super("The call to #{call} failed with result #{result}")
+    end
+  end
+
   class Execution
     def self.from_hash(session, hash)
       job = Job.from_hash(session, hash['job'])
@@ -30,7 +48,7 @@ module Rundeck
     end
 
     def self.where(project)
-      qb = QueryBuilder.new
+      qb = SearchQueryBuilder.new
       yield qb if block_given?
 
       endpoint = "api/5/executions?project=#{project.name}#{qb.query}"
@@ -41,9 +59,10 @@ module Rundeck
     end
 
     def output
-      ret = session.get("api/9/execution/#{id}/output")
+      path = "api/9/execution/#{id}/output"
+      ret = session.get(path)
       result = ret['result']
-      raise "API call not successful" unless result && result['success']=='true'
+      raise APIFailure.new(path, result) unless result && result['success']=='true'
 
       #sort the output by node
       ret = result['output'].slice(*%w(id completed hasFailedNodes))
@@ -51,17 +70,36 @@ module Rundeck
       ret
     end
 
-    class QueryBuilder
+    def wait_for_complete(poll_interval, timeout)
+      Timeout.timeout(timeout) do
+        while (cur = self.class.find(session, id)).status != :succeeded
+          raise ExecutionFailure.new(self) if cur.status == :failed
+          sleep(poll_interval)
+        end
+      end
+    rescue Timeout::Error
+      raise ExecutionTimeout.new(self)
+    end
+
+    class SearchQueryBuilder
       attr_accessor :status, :max, :offset
+
+      class ValidationError < StandardError
+        def initialize(field, value, message=nil)
+          msg = "Invalid #{field}: #{value}"
+          msg += message unless message==nil
+          super(msg)
+        end
+      end
 
       def self.valid_statuses
         %w(succeeded failed aborted running) << nil
       end
 
       def validate
-        raise "Invalid requested status: #{status}" unless status.nil? || elf.class.valid_statuses.include?(status.to_s)
-        raise "Invalid offset: #{offset}" unless offset.nil? || offset.to_i >= 0
-        raise "Invalid max: #{max}" unless max.nil? || max.to_i >= 0
+        raise ValidationError.new("requested status", status) unless status.nil? || self.class.valid_statuses.include?(status.to_s)
+        raise ValidationError.new("offset", offset) unless offset.nil? || offset.to_i >= 0
+        raise ValidationError.new("max", max) unless max.nil? || max.to_i >= 0
       end
 
       def query
