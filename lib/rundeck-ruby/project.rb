@@ -24,7 +24,7 @@ module Rundeck
     end
 
     def job(id)
-      jobs.first{|j| j.id == id}
+      jobs.find{|j| j.id == id}
     end
 
     def resources
